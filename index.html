@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>[MDR]오늘의 팀</title>
+    
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="[MDR]오늘의 팀">
+    <meta property="og:description" content="⚽ 이번 주 매치 참석 투표 및 황금 밸런스 팀 매칭!">
+    <meta property="og:image" content="https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=1000&auto=format&fit=crop">
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@100;300;400;500;700;900&display=swap');
+        body { 
+            font-family: 'Noto Sans KR', sans-serif; 
+            -webkit-tap-highlight-color: transparent; 
+            height: 100dvh; 
+            overflow: hidden; 
+            overscroll-behavior: none;
+        }
+        #root { height: 100dvh; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .status-btn { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
+        .break-keep { word-break: keep-all; }
+        
+        /* 🐖 돼지 캐릭터 애니메이션 */
+        @keyframes dribble-run {
+            0% { transform: translateX(-150px) scaleX(1); }
+            45% { transform: translateX(150px) scaleX(1); }
+            50% { transform: translateX(150px) scaleX(-1); }
+            95% { transform: translateX(-150px) scaleX(-1); }
+            100% { transform: translateX(-150px) scaleX(1); }
+        }
+        @keyframes ball-kick {
+            0%, 100% { transform: translateX(0) translateY(0); }
+            25% { transform: translateX(25px) translateY(-20px) rotate(45deg); }
+            50% { transform: translateX(50px) translateY(0) rotate(90deg); }
+        }
+        @keyframes piggy-bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-12px); }
+        }
+        @keyframes shadow-scale {
+            0%, 100% { transform: scale(1); opacity: 0.15; }
+            50% { transform: scale(0.6); opacity: 0.05; }
+        }
+        
+        .animate-dribble-area { animation: dribble-run 4.5s infinite linear; }
+        .animate-piggy-run { animation: piggy-bounce 0.45s infinite ease-in-out; }
+        .animate-ball-kick { animation: ball-kick 0.9s infinite ease-out; }
+        .animate-piggy-shadow { animation: shadow-scale 0.45s infinite ease-in-out; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+        
+        const Icon = ({ name, className }) => {
+            const iconRef = useRef(null);
+            useEffect(() => {
+                if (iconRef.current && window.lucide) {
+                    const kebabName = name.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+                    const temp = document.createElement('div');
+                    const i = document.createElement('i');
+                    i.setAttribute('data-lucide', kebabName);
+                    if (className) i.setAttribute('class', className);
+                    temp.appendChild(i);
+                    window.lucide.createIcons({ root: temp });
+                    if (temp.firstChild) iconRef.current.innerHTML = temp.innerHTML;
+                }
+            }, [name, className]);
+            return <span ref={iconRef} className="inline-flex items-center justify-center leading-none"></span>;
+        };
+
+        function App() {
+            const [members, setMembers] = useState([]); 
+            const [matchedTeams, setMatchedTeams] = useState(null);
+            const [teamCount, setTeamCount] = useState(2);
+            const [activeTab, setActiveTab] = useState('members'); 
+            const [mainTab, setMainTab] = useState('match'); 
+            const [isAdmin, setIsAdmin] = useState(false); 
+            const [isMatching, setIsMatching] = useState(false);
+            const [isLoading, setIsLoading] = useState(true);
+            const [newMember, setNewMember] = useState({ name: '', gender: '남', level: 3 });
+            
+            // 필터 모드 ('all' | 'attending' | 'hold' | 'unvoted')
+            const [filterMode, setFilterMode] = useState('all');
+
+            const [showAdminModal, setShowAdminModal] = useState(false);
+            const [showGuestModal, setShowGuestModal] = useState(false);
+            const [showDeleteModal, setShowDeleteModal] = useState(null); 
+            const [showConfirmModal, setShowConfirmModal] = useState(null); 
+            const [showResetModal, setShowResetModal] = useState(false); 
+
+            const [passwordInput, setPasswordInput] = useState('');
+            const [passwordError, setPasswordError] = useState(false);
+            const [guestInput, setGuestInput] = useState({ name: '', gender: '남', level: 3 });
+            const [showToast, setShowToast] = useState(null); 
+
+            // 💡 뚱서님의 최신 API URL 유지
+            const SHEET_API_URL = "https://script.google.com/macros/s/AKfycbyHqmuCwvepZmJ4Sm6__T8cWgKoG_aS_vKnAMj1fBFL54BQICAqjvxsqY_M-J6KfA/exec";
+            
+            const fetchMembers = () => {
+                if (!SHEET_API_URL) return;
+                
+                fetch(SHEET_API_URL)
+                    .then(async (res) => {
+                        const text = await res.text();
+                        try {
+                            return JSON.parse(text);
+                        } catch (e) {
+                            console.error("서버 응답 오류 (HTML 반환 가능성):", text);
+                            throw new Error("Invalid JSON");
+                        }
+                    })
+                    .then(data => {
+                        const validMembers = data.filter(m => m && m.name && String(m.name).trim() !== '');
+                        const formattedData = validMembers.map(m => {
+                            let levelValue = 3;
+                            if (typeof m.level === 'string') levelValue = parseInt(m.level.replace(/[^0-9]/g, '')) || 3;
+                            else if (typeof m.level === 'number') levelValue = m.level;
+                            let genderValue = m.gender === 'M' ? '남' : m.gender === 'F' ? '여' : m.gender;
+                            
+                            let attendanceStatus = null;
+                            const raw = String(m.isAttending || "").trim().toUpperCase();
+                            
+                            if (m.isAttending === true || raw === "TRUE") attendanceStatus = true;
+                            else if (m.isAttending === false || raw === "FALSE") attendanceStatus = false;
+                            else if (raw === "HOLD" || raw === "보류") attendanceStatus = "hold";
+
+                            return { ...m, gender: genderValue, level: levelValue, isAttending: attendanceStatus };
+                        });
+                        setMembers(formattedData);
+                        setIsLoading(false); 
+                    })
+                    .catch(err => {
+                        console.error("데이터 로드 에러:", err);
+                        notify("데이터 로딩 실패 (시트 권한을 확인하세요)");
+                        setIsLoading(false);
+                    });
+            };
+
+            useEffect(() => {
+                fetchMembers();
+            }, []);
+
+            const notify = (msg) => {
+                setShowToast(msg);
+                setTimeout(() => setShowToast(null), 2500);
+            };
+
+            const handleTabChange = (tab) => {
+                if (tab === 'match' && !isAdmin) setShowAdminModal(true);
+                else setActiveTab(tab);
+            };
+
+            const handleAdminLogin = () => {
+                if (passwordInput === "0703") {
+                    setIsAdmin(true);
+                    setShowAdminModal(false);
+                    setPasswordInput('');
+                    setActiveTab('match'); 
+                    notify("관리자 인증 성공!");
+                } else setPasswordError(true);
+            };
+
+            const handleLogout = () => {
+                setIsAdmin(false);
+                setActiveTab('members');
+                notify("관리자 모드가 해제되었습니다.");
+            };
+
+            const requestAttendanceChange = (id, name, status) => {
+                const target = members.find(m => m.id === id);
+                if (!target || target.isAttending === status) return;
+                setShowConfirmModal({ id, name, nextStatus: status });
+            };
+
+            const executeAttendanceChange = () => {
+                if (!showConfirmModal) return;
+                const { id, name, nextStatus } = showConfirmModal;
+                setMembers(members.map(m => m.id === id ? { ...m, isAttending: nextStatus } : m));
+                setMatchedTeams(null);
+                
+                if (SHEET_API_URL) {
+                    const apiStatus = nextStatus === "hold" ? "HOLD" : nextStatus;
+                    fetch(SHEET_API_URL, {
+                        method: 'POST',
+                        mode: 'no-cors',
+                        body: JSON.stringify({ action: 'toggle', name: name, status: apiStatus })
+                    });
+                }
+                setShowConfirmModal(null);
+                notify(`${name}님의 상태가 변경되었습니다.`);
+            };
+
+            const executeReset = () => {
+                setMembers(members.map(m => ({ ...m, isAttending: null })));
+                setMatchedTeams(null);
+                if (SHEET_API_URL) {
+                    fetch(SHEET_API_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ action: 'bulkToggle', status: null }) });
+                }
+                setShowResetModal(false);
+                notify("모든 투표 기록이 초기화되었습니다.");
+            };
+
+            const handleShareText = () => {
+                if (!matchedTeams) return;
+                let text = `⚽ 오늘의 팀 매칭 결과 ⚽\n\n`;
+                matchedTeams.forEach(team => {
+                    text += `[${team.name}]\n`;
+                    text += team.players.map(p => `- ${p.name}(${p.gender === '남' ? '남' : '여'})`).join('\n');
+                    text += `\n\n`;
+                });
+                text += `오늘도 즐거운 경기 하세요! 🔥`;
+                const textArea = document.body.appendChild(document.createElement("textarea"));
+                textArea.value = text;
+                textArea.select();
+                try {
+                    document.execCommand('copy');
+                    notify("결과가 복사되었습니다!");
+                } catch (err) {}
+                document.body.removeChild(textArea);
+            };
+
+            const generateTeams = () => {
+                const attendees = members.filter(m => m.isAttending === true);
+                if (attendees.length < teamCount * 5) {
+                    notify(`인원이 부족합니다. ${teamCount}파전은 최소 ${teamCount * 5}명이 필요합니다.`);
+                    return;
+                }
+                setIsMatching(true);
+                setTimeout(() => {
+                    let teams = Array.from({ length: teamCount }, (_, i) => ({
+                        id: i, name: `${String.fromCharCode(65 + i)}팀`, players: [], totalLevel: 0, fCount: 0, mCount: 0
+                    }));
+                    const females = attendees.filter(p => p.gender === '여' || p.gender === 'F').sort((a, b) => b.level - a.level);
+                    const males = attendees.filter(p => p.gender === '남' || p.gender === 'M').sort((a, b) => b.level - a.level);
+                    
+                    const distributeGroup = (players, isFemale) => {
+                        for (let i = 0; i < players.length; i += teamCount) {
+                            let chunk = players.slice(i, i + teamCount);
+                            chunk.sort(() => Math.random() - 0.5);
+                            teams.sort((a, b) => {
+                                const countA = isFemale ? a.fCount : a.players.length;
+                                const countB = isFemale ? b.fCount : b.players.length;
+                                if (countA !== countB) return countA - countB;
+                                return a.totalLevel - b.totalLevel;
+                            });
+                            chunk.forEach((player, idx) => {
+                                if (teams[idx]) {
+                                    teams[idx].players.push(player);
+                                    teams[idx].totalLevel += player.level;
+                                    if (isFemale) {
+                                        teams[idx].fCount += 1;
+                                    } else {
+                                        teams[idx].mCount += 1;
+                                    }
+                                }
+                            });
+                        }
+                    };
+
+                    distributeGroup(females, true);
+                    distributeGroup(males, false);
+
+                    setMatchedTeams(teams.sort((a, b) => a.id - b.id));
+                    setIsMatching(false);
+                }, 800);
+            };
+
+            const sortedMembers = [...members].sort((a, b) => !a.isGuest ? a.name.localeCompare(b.name, 'ko-KR') : a.id - b.id);
+            
+            // 필터 조건 분기 처리 (참석, 보류, 미투표에 따른 필터링)
+            const filteredMembers = sortedMembers.filter(m => {
+                if (filterMode === 'unvoted') return m.isAttending === null;
+                if (filterMode === 'attending') return m.isAttending === true;
+                if (filterMode === 'hold') return m.isAttending === "hold";
+                return true;
+            });
+
+            const attendingCount = members.filter(m => m.isAttending === true).length;
+            const holdCount = members.filter(m => m.isAttending === "hold").length;
+            const unvotedCount = members.filter(m => m.isAttending === null).length;
+
+            if (isLoading) {
+                return (
+                    <div className="h-screen w-full flex flex-col items-center justify-center bg-white p-10 text-center select-none">
+                        <div className="relative mb-12 h-32 w-full flex items-center justify-center overflow-visible text-center">
+                            <div className="animate-dribble-area flex items-center gap-6">
+                                <div className="animate-piggy-run relative flex flex-col items-center">
+                                    <svg width="76" height="76" viewBox="0 0 64 64">
+                                        <circle cx="32" cy="38" r="21" fill="#FFC0CB" stroke="#FF69B4" strokeWidth="1.5" />
+                                        <circle cx="32" cy="28" r="16" fill="#FFC0CB" stroke="#FF69B4" strokeWidth="1.5" />
+                                        <path d="M19 18 Q16 6 26 15" fill="#FFC0CB" stroke="#FF69B4" strokeWidth="1.5" />
+                                        <path d="M45 18 Q48 6 38 15" fill="#FFC0CB" stroke="#FF69B4" strokeWidth="1.5" />
+                                        <ellipse cx="32" cy="32" rx="7" ry="5" fill="#FF69B4" />
+                                        <circle cx="29" cy="32" r="1" fill="#C71585" />
+                                        <circle cx="35" cy="32" r="1" fill="#C71585" />
+                                        <circle cx="26" cy="25" r="1.8" fill="#333" />
+                                        <circle cx="38" cy="25" r="1.8" fill="#333" />
+                                    </svg>
+                                    <div className="w-12 h-1.5 bg-gray-900/10 rounded-full mt-1 blur-[1px] animate-piggy-shadow"></div>
+                                </div>
+                                <div className="animate-ball-kick text-5xl leading-none">⚽</div>
+                            </div>
+                        </div>
+                        <p className="text-sm text-gray-400 font-bold tracking-tight">명단을 불러오고 있습니다...</p>
+                        <p className="mt-4 text-xs text-green-600/90 font-black italic uppercase tracking-[0.2em]">made by 뚱서</p>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="h-[100dvh] w-full flex flex-col md:flex-row relative bg-gray-50 overflow-hidden text-center">
+                    {showToast && (
+                        <div className="fixed top-8 left-1/2 transform -translate-x-1/2 z-[200] bg-gray-900/90 backdrop-blur-md text-white px-6 py-2.5 rounded-full shadow-xl font-bold animate-in fade-in slide-in-from-top-2 duration-300 text-xs text-center whitespace-nowrap">
+                            {showToast}
+                        </div>
+                    )}
+
+                    {/* 사이드바: 참석체크 */}
+                    <div className={`w-full md:w-80 bg-white border-r border-gray-100 flex flex-col h-full ${activeTab !== 'members' ? 'hidden md:flex' : 'flex'}`}>
+                        <div className="p-3.5 border-b border-gray-50 bg-white sticky top-0 z-20 flex justify-between items-center shrink-0">
+                            <h1 className="text-lg font-black text-green-600 flex items-center gap-2 tracking-tighter text-left">
+                                <span className="text-xl text-left">⚽</span> 오늘의 팀
+                            </h1>
+                            {isAdmin && <button onClick={handleLogout} className="text-[10px] bg-gray-100 text-gray-500 px-2 py-1 rounded-md font-bold hover:bg-gray-200 transition-colors">인증 해제</button>}
+                        </div>
+                        
+                        <div className="flex-1 overflow-y-auto overscroll-none no-scrollbar">
+                            {/* 틀고정 영역 (필터 기능 확장 및 슬림화) */}
+                            <div className="sticky top-0 z-10 bg-white/95 backdrop-blur-sm px-3.5 py-1.5 shadow-[0_10px_20px_-15px_rgba(0,0,0,0.08)] border-b border-gray-50">
+                                <div className="flex justify-between items-center h-8">
+                                    <div className="flex items-center gap-2 text-left">
+                                        <h2 className="text-[10px] font-black text-gray-400 uppercase tracking-widest text-left">
+                                            {filterMode === 'all' && '투표 현황'}
+                                            {filterMode === 'attending' && '참석자 명단'}
+                                            {filterMode === 'hold' && '보류자 명단'}
+                                            {filterMode === 'unvoted' && '미투표 명단'}
+                                        </h2>
+                                        {isAdmin && <button onClick={() => setShowResetModal(true)} className="px-1.5 py-0.5 bg-red-50 text-red-500 rounded text-[9px] font-black hover:bg-red-100">초기화</button>}
+                                    </div>
+                                    <div className="flex gap-1 text-[9px] font-black items-center">
+                                        {filterMode !== 'all' ? (
+                                            <button 
+                                                onClick={() => setFilterMode('all')} 
+                                                className="text-white bg-green-500 px-2.5 py-1 rounded-full shadow-md active:scale-95 transition-all text-[9px]"
+                                            >
+                                                전체보기
+                                            </button>
+                                        ) : (
+                                            <>
+                                                <button 
+                                                    onClick={() => attendingCount > 0 && setFilterMode('attending')}
+                                                    className={`px-2 py-0.5 rounded-full transition-all active:scale-95 ${attendingCount > 0 ? 'text-green-500 bg-green-50 shadow-sm cursor-pointer hover:bg-green-100' : 'text-gray-300 bg-gray-50 cursor-default'}`}
+                                                >
+                                                    {attendingCount} 참석
+                                                </button>
+                                                <button 
+                                                    onClick={() => holdCount > 0 && setFilterMode('hold')}
+                                                    className={`px-2 py-0.5 rounded-full transition-all active:scale-95 ${holdCount > 0 ? 'text-amber-500 bg-amber-50 shadow-sm cursor-pointer hover:bg-amber-100' : 'text-gray-300 bg-gray-50 cursor-default'}`}
+                                                >
+                                                    {holdCount} 보류
+                                                </button>
+                                                <button 
+                                                    onClick={() => unvotedCount > 0 && setFilterMode('unvoted')}
+                                                    className={`px-2 py-0.5 rounded-full transition-all active:scale-95 ${unvotedCount > 0 ? 'text-orange-500 bg-orange-50 shadow-sm cursor-pointer hover:bg-orange-100' : 'text-gray-300 bg-gray-50 cursor-default'}`}
+                                                >
+                                                    {unvotedCount} 미투표
+                                                </button>
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div className="p-3.5 space-y-2 pb-28 md:pb-8">
+                                {filteredMembers.length === 0 ? (
+                                    <div className="py-12 text-center flex flex-col items-center gap-3">
+                                        <div className="w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center"><Icon name="SearchX" className="w-6 h-6 text-gray-200" /></div>
+                                        <p className="text-[11px] text-gray-300 font-bold break-keep">
+                                            {filterMode === 'unvoted' && "모든 멤버가 투표를 완료했습니다! ✨"}
+                                            {filterMode === 'attending' && "참석을 투표한 멤버가 없습니다."}
+                                            {filterMode === 'hold' && "보류 상태인 멤버가 없습니다."}
+                                            {filterMode === 'all' && "등록된 멤버가 없습니다."}
+                                        </p>
+                                        {filterMode !== 'all' && (
+                                            <button onClick={() => setFilterMode('all')} className="mt-2 text-[10px] font-black text-green-600 bg-green-50 px-4 py-1.5 rounded-lg active:scale-95 transition-all">명단 전체 보기</button>
+                                        )}
+                                    </div>
+                                ) : filteredMembers.map(member => (
+                                    <div key={member.id} className={`flex items-center justify-between p-2 rounded-2xl border transition-all ${member.isAttending === true ? 'bg-green-50/30 border-green-100' : member.isAttending === false ? 'bg-red-50/10 border-red-50' : member.isAttending === "hold" ? 'bg-amber-50/20 border-amber-100' : 'bg-white border-transparent'}`}>
+                                        <div className="flex items-center gap-3 text-left">
+                                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-[11px] shadow-sm ${member.gender === '남' ? 'bg-blue-100 text-blue-600' : 'bg-orange-100 text-orange-600'}`}>{member.gender}</div>
+                                            <div className="flex flex-col text-left">
+                                                <div className="flex items-center gap-1.5 text-left">
+                                                    <span className={`font-bold text-sm ${member.isAttending === true ? 'text-green-700' : member.isAttending === false ? 'text-red-400 opacity-60' : member.isAttending === "hold" ? 'text-amber-600 font-black' : 'text-gray-500'}`}>{member.name}</span>
+                                                    {isAdmin && <span className="text-[9px] font-black text-gray-300 bg-gray-50 px-1.5 py-0.5 rounded">Lv.{member.level}</span>}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        {/* 버튼 순서: 참석 - 불참 - 보류 */}
+                                        <div className="flex bg-gray-100 p-0.5 rounded-xl border border-gray-100 shadow-inner shrink-0">
+                                            <button onClick={() => requestAttendanceChange(member.id, member.name, true)} className={`status-btn px-2.5 py-1.5 rounded-lg text-[10px] font-black ${member.isAttending === true ? 'bg-green-500 text-white shadow-md' : 'text-gray-400 hover:text-gray-600'}`}>참석</button>
+                                            <button onClick={() => requestAttendanceChange(member.id, member.name, false)} className={`status-btn px-2.5 py-1.5 rounded-lg text-[10px] font-black ${member.isAttending === false ? 'bg-red-400 text-white shadow-md' : 'text-gray-400 hover:text-gray-600'}`}>불참</button>
+                                            <button onClick={() => requestAttendanceChange(member.id, member.name, "hold")} className={`status-btn px-2.5 py-1.5 rounded-lg text-[10px] font-black ${member.isAttending === "hold" ? 'bg-amber-500 text-white shadow-md' : 'text-gray-400 hover:text-gray-600'}`}>보류</button>
+                                        </div>
+                                    </div>
+                                ))}
+                                <button onClick={() => setShowGuestModal(true)} className="w-full mt-4 py-3.5 border-2 border-dashed border-gray-100 text-gray-300 rounded-2xl flex items-center justify-center gap-2 hover:border-green-300 hover:text-green-500 transition-all font-bold text-[11px] uppercase tracking-wider"><Icon name="UserPlus" className="w-4 h-4" /> 용병 추가 등록</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 메인 영역 */}
+                    <div className={`flex-1 flex flex-col h-full overflow-hidden ${activeTab !== 'match' ? 'hidden md:flex' : 'flex'}`}>
+                        {isAdmin ? (
+                            <>
+                                <div className="bg-white border-b border-gray-100 px-4 md:px-8 flex gap-6 sticky top-0 z-10 shadow-sm text-sm font-bold shrink-0">
+                                    <button onClick={() => setMainTab('match')} className={`py-4 border-b-2 transition-all ${mainTab === 'match' ? 'border-green-500 text-green-600' : 'border-transparent text-gray-400'}`}>팀 매칭 결과</button>
+                                    <button onClick={() => setMainTab('manage')} className={`py-4 border-b-2 transition-all ${mainTab === 'manage' ? 'border-green-555 text-green-600' : 'border-transparent text-gray-400'}`}>멤버 DB 관리</button>
+                                </div>
+                                {/* 💡 수정 핵심: 모바일 환경에서 탭 바(60~80px)에 의해 잘리지 않도록 pb-28 추가 (기존 p-4 md:p-8 -> p-4 pb-28 md:p-8 md:pb-8) */}
+                                <div className="flex-1 overflow-y-auto no-scrollbar p-4 pb-28 md:p-8 md:pb-8">
+                                    {mainTab === 'match' ? (
+                                        <div className="animate-in fade-in duration-500 text-center">
+                                            <h2 className="text-xl md:text-2xl font-black mb-1 leading-tight break-keep text-gray-800">{matchedTeams ? "짜잔! 황금 밸런스 팀 탄생! 🎉" : "운명적인 팀원은 누구? 지금 바로 확인하기!"}</h2>
+                                            <p className="text-gray-400 text-[11px] md:text-xs font-medium mb-6 uppercase tracking-tight break-keep">{matchedTeams ? "성별과 실력을 고려해 최상의 조합을 찾았습니다." : "오늘 우리 팀의 라인업을 확인해보세요."}</p>
+                                            <div className="bg-white p-4 md:p-5 rounded-2xl shadow-sm border border-gray-100 mb-6 mx-auto max-lg text-left">
+                                                <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+                                                    <div className="flex items-center gap-3"><label className="text-[10px] font-black text-gray-300 uppercase tracking-tighter whitespace-nowrap">매치 방식</label><div className="flex gap-1.5">{[2, 3, 4].map(num => (
+                                                        <button key={num} onClick={() => { setTeamCount(num); setMatchedTeams(null); }} className={`px-4 py-1.5 rounded-lg font-black text-[11px] transition-all ${teamCount === num ? 'bg-green-600 text-white shadow-md' : 'bg-gray-50 text-gray-400 hover:bg-gray-100'}`}>{num}파전</button>
+                                                    ))}</div></div>
+                                                    <button onClick={generateTeams} disabled={isMatching} className="w-full md:w-auto bg-green-500 text-white px-6 py-2.5 rounded-xl font-black text-xs shadow-lg active:scale-95 transition-all uppercase tracking-tight">{isMatching ? '분석 중...' : '팀 매칭 시작'}</button>
+                                                </div>
+                                                <div className="mt-4 space-y-2">
+                                                    {attendingCount < teamCount * 5 && (
+                                                        <div className="flex items-center gap-2 text-red-500 text-[10px] font-black bg-red-50 p-3 rounded-xl border border-red-100">
+                                                            <Icon name="AlertCircle" className="w-4 h-4" /> 
+                                                            <span>인원이 부족합니다. {teamCount}파전은 최소 {teamCount * 5}명이 필요합니다. (현재 참석 {attendingCount}명)</span>
+                                                        </div>
+                                                    )}
+                                                    {holdCount > 0 && (
+                                                        <div className="flex items-center gap-2 text-amber-600 text-[9px] font-bold bg-amber-50/50 p-2 rounded-lg border border-amber-100/50 text-center">
+                                                            <Icon name="Info" className="w-3.5 h-3.5" />
+                                                            <span>보류 상태인 {holdCount}명은 팀 매칭에서 제외됩니다.</span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            {matchedTeams && (
+                                                <div className={`mx-auto space-y-6 ${matchedTeams.length === 3 ? 'max-w-5xl' : 'max-w-3xl'}`}>
+                                                    <div className="flex justify-end"><button onClick={handleShareText} className="flex items-center gap-2 px-4 py-2 bg-[#FEE500] text-[#371D1E] rounded-xl font-black shadow-sm text-[11px] active:scale-95 transition-all hover:bg-[#F4DC00]"><Icon name="Share2" className="w-3.5 h-3.5" /> 결과 텍스트 복사</button></div>
+                                                    <div className={`grid grid-cols-1 gap-4 ${matchedTeams.length === 3 ? 'md:grid-cols-3' : 'md:grid-cols-2 max-w-4xl mx-auto'}`}>
+                                                        {matchedTeams.map((team, idx) => (
+                                                            <div key={idx} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden text-left border-t-4 border-t-green-600">
+                                                                <div className="bg-green-50/50 p-4 flex justify-between items-center text-green-700 font-black"><h3 className="text-base uppercase tracking-tighter">{team.name}</h3><span className="text-[9px] font-black bg-white text-green-600 border border-green-200 px-2 py-0.5 rounded-full shadow-sm">합 {team.totalLevel}</span></div>
+                                                                <div className="px-4 py-2 bg-gray-50 flex justify-between text-[9px] font-black text-gray-400 border-b border-gray-100 uppercase tracking-tighter"><span>{team.players.length}명 참여</span><span>남 {team.mCount} / 여 {team.fCount}</span></div>
+                                                                <div className="p-2 space-y-1 bg-white">{team.players.map(p => (<div key={p.id} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded-lg transition-colors text-left text-left"><div className="flex items-center gap-2"><span className={`text-[8px] font-black w-4 h-4 flex items-center justify-center rounded-full ${p.gender === '남' ? 'bg-blue-50 text-blue-500' : 'bg-orange-100 text-orange-600'}`}>{p.gender}</span><span className="font-bold text-gray-700 text-xs">{p.name}</span></div><span className="text-[9px] font-black text-gray-300 tracking-tighter">Lv.{p.level}</span></div>))}</div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <div className="animate-in fade-in duration-300 max-w-2xl mx-auto text-left">
+                                            <h2 className="text-xl font-black mb-6 text-gray-800 uppercase tracking-tighter">정기멤버 관리 <span className="text-gray-300 text-sm font-bold ml-2">({members.filter(m => !m.isGuest).length})</span></h2>
+                                            <div className="bg-white p-4 md:p-5 rounded-2xl shadow-sm border border-gray-100">
+                                                <div className="mb-6 bg-gray-50/50 p-4 rounded-xl border border-gray-100 text-center">
+                                                    <h3 className="text-[9px] font-black text-gray-400 mb-3 uppercase tracking-widest text-center">신규 멤버 등록</h3>
+                                                    <div className="flex flex-col md:flex-row gap-2">
+                                                        <input type="text" placeholder="이름" className="border border-gray-200 p-2 rounded-lg md:w-28 outline-none focus:border-green-500 font-bold text-xs bg-white shadow-inner" value={newMember.name} onChange={e => setNewMember({...newMember, name: e.target.value})} />
+                                                        <div className="flex gap-2 flex-1">
+                                                            <div className="flex gap-1 bg-white border border-gray-100 p-1 rounded-lg flex-1 shadow-sm text-center">
+                                                                <button onClick={() => setNewMember({...newMember, gender: '남'})} className={`flex-1 py-1 rounded-md font-black text-[9px] transition-all ${newMember.gender === '남' ? 'bg-blue-500 text-white shadow-md' : 'text-blue-500 bg-transparent'}`}>남</button>
+                                                                <button onClick={() => setNewMember({...newMember, gender: '여'})} className={`flex-1 py-1 rounded-md font-black text-[9px] transition-all ${newMember.gender === '여' ? 'bg-orange-500 text-white shadow-md' : 'text-orange-500 bg-transparent'}`}>여</button>
+                                                            </div>
+                                                            <select className="border border-gray-200 p-2 rounded-lg flex-1 font-black bg-white outline-none focus:border-green-500 text-[10px] shadow-sm cursor-pointer text-center" value={newMember.level} onChange={e => setNewMember({...newMember, level: Number(e.target.value)})}>{[1,2,3,4,5].map(v => <option key={v} value={v}>Lv.{v}</option>)}</select>
+                                                        </div>
+                                                        <button onClick={() => { if (!newMember.name.trim()) return; const newId = Date.now(); const memberToAdd = { ...newMember, id: newId, isGuest: false, isAttending: null }; setMembers([...members, memberToAdd]); setNewMember({ name: '', gender: '남', level: 3 }); if (SHEET_API_URL) fetch(SHEET_API_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ action: 'add', name: memberToAdd.name, gender: memberToAdd.gender, level: `Lv${memberToAdd.level}` }) }).then(() => notify("DB 등록 완료!")); }} className="bg-gray-800 text-white px-5 py-2 rounded-lg font-black hover:bg-black transition-all shadow-sm active:scale-95 text-[10px] uppercase">등록</button>
+                                                    </div>
+                                                </div>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-left">{sortedMembers.filter(m => !m.isGuest).map(member => (
+                                                    <div key={member.id} className="flex justify-between items-center p-2.5 border border-gray-100 rounded-xl hover:border-green-100 hover:bg-green-50/10 transition-all group text-left">
+                                                        <div className="flex items-center gap-2.5">
+                                                            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[8px] font-black shadow-sm ${member.gender === '남' ? 'bg-blue-50 text-blue-500' : 'bg-orange-100 text-orange-600'}`}>{member.gender}</span>
+                                                            <div className="flex items-center gap-2 text-left">
+                                                                <div className="font-bold text-gray-700 text-xs text-left">{member.name}</div>
+                                                                <select className="text-[8px] font-black border border-gray-100 rounded px-1 py-0.5 bg-white outline-none focus:border-green-300 cursor-pointer shadow-sm text-center" value={member.level} onChange={e => { setMembers(members.map(m => m.id === member.id ? { ...m, level: Number(e.target.value) } : m)); if (SHEET_API_URL) fetch(SHEET_API_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ action: 'update', name: member.name, level: `Lv${e.target.value}` }) }).then(() => notify(`${member.name}님 실력 수정 완료`)); }}>{[1,2,3,4,5].map(v => <option key={v} value={v}>Lv.{v}</option>)}</select>
+                                                            </div>
+                                                        </div>
+                                                        <button onClick={() => setShowDeleteModal(member)} className="p-1.5 text-gray-200 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100 bg-gray-50 rounded-lg"><Icon name="Trash2" className="w-3.5 h-3.5" /></button>
+                                                    </div>
+                                                ))}</div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </>
+                        ) : (
+                            <div className="flex flex-col items-center justify-center h-full p-10 text-center animate-in fade-in zoom-in-95 text-center text-center">
+                                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4 shadow-inner text-center"><Icon name="Lock" className="w-8 h-8 text-gray-300" /></div>
+                                <h2 className="text-lg font-black text-gray-800 mb-2 border-b border-gray-100 pb-2 uppercase tracking-tighter text-center">Admin Only</h2>
+                                <p className="text-xs text-gray-400 break-keep mb-6 font-medium text-center">팀 매칭과 DB 관리는 관리자 전용 메뉴입니다.</p>
+                                <button onClick={() => setShowAdminModal(true)} className="bg-green-600 text-white px-8 py-3 rounded-xl font-black text-sm shadow-lg active:scale-95 transition-all uppercase tracking-tighter hover:bg-green-700 text-center">관리자 비밀번호 입력</button>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="md:hidden fixed bottom-0 w-full bg-white/90 backdrop-blur-md border-t border-gray-50 flex justify-around p-2 pb-safe z-50 shadow-lg shrink-0 text-center">
+                        <button onClick={() => handleTabChange('members')} className={`flex flex-col items-center py-2 flex-1 transition-all ${activeTab === 'members' ? 'text-green-600 scale-105 font-black' : 'text-gray-300'}`}><Icon name="Users" className="w-5 h-5 mb-0.5" /><span className="text-[9px] uppercase font-black tracking-tighter text-center">참석체크</span></button>
+                        <button onClick={() => handleTabChange('match')} className={`flex flex-col items-center py-2 flex-1 transition-all ${activeTab === 'match' ? 'text-green-600 scale-105 font-black' : 'text-gray-300'}`}>
+                            <span className="text-xl mb-0.5">⚽</span>
+                            <span className="text-[9px] uppercase font-black tracking-tighter text-center">팀매칭</span>
+                        </button>
+                    </div>
+
+                    {/* 전체 초기화 확인 모달 */}
+                    {showResetModal && (
+                        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[150] p-4 backdrop-blur-sm text-center text-center">
+                            <div className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl animate-in zoom-in-95 duration-200 border border-gray-100 text-center text-center text-center">
+                                <div className="w-12 h-12 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 text-center">
+                                    <Icon name="RotateCcw" className="w-6 h-6" />
+                                </div>
+                                <h3 className="text-base font-black mb-1 break-keep text-center text-center">모든 투표 초기화</h3>
+                                <p className="text-[11px] text-gray-500 mb-6 break-keep leading-relaxed font-medium text-center">현재 등록된 모든 멤버의 투표 상태를<br/><span className="text-red-500 font-black">"미투표"</span> 상태로 되돌리시겠습니까?</p>
+                                <div className="flex gap-2 text-center text-center">
+                                    <button onClick={() => setShowResetModal(false)} className="flex-1 py-3.5 bg-gray-50 rounded-xl font-bold text-xs text-gray-400 active:scale-95 transition-all text-center">취소</button>
+                                    <button onClick={executeReset} className="flex-1 py-3.5 bg-red-500 text-white rounded-xl font-bold text-xs shadow-md active:scale-95 transition-all text-center">네, 초기화합니다</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* 본인 확인 팝업 */}
+                    {showConfirmModal && (
+                        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[110] p-4 backdrop-blur-sm text-center text-center">
+                            <div className="bg-white rounded-3xl p-8 max-w-xs w-full shadow-2xl animate-in zoom-in-95 duration-200 border border-gray-100 text-center text-center text-center text-center">
+                                <div className={`w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-5 ${showConfirmModal.nextStatus === true ? 'bg-green-50 text-green-600' : showConfirmModal.nextStatus === "hold" ? 'bg-amber-50 text-amber-600' : 'bg-red-50 text-red-500'} shadow-sm text-center`}>
+                                    <Icon name={showConfirmModal.nextStatus === true ? "UserCheck" : showConfirmModal.nextStatus === "hold" ? "Clock" : "UserX"} className="w-7 h-7" />
+                                </div>
+                                <h3 className="text-lg font-black mb-2 text-gray-800 tracking-tight text-center text-center text-center">본인 확인</h3>
+                                <p className="text-[11px] text-gray-500 mb-8 break-keep leading-relaxed font-medium text-center text-center">
+                                    <span className="text-gray-900 font-black text-center text-center">[{showConfirmModal.name}]</span>님의 참석 상태를<br/>
+                                    <span className={`font-black text-center text-center ${showConfirmModal.nextStatus === true ? 'text-green-600' : showConfirmModal.nextStatus === "hold" ? 'text-amber-600' : 'text-red-500'}`}>
+                                        {showConfirmModal.nextStatus === true ? '"참석"' : showConfirmModal.nextStatus === "hold" ? '"보류"' : '"불참"'}
+                                    </span>으로 변경하시겠습니까?
+                                </p>
+                                <div className="flex gap-3 text-center text-center">
+                                    <button onClick={() => setShowConfirmModal(null)} className="flex-1 py-4 bg-gray-100 rounded-2xl font-bold text-xs text-gray-400 active:scale-95 transition-all tracking-tight text-center text-center">아니요</button>
+                                    <button onClick={executeAttendanceChange} className={`flex-1 py-4 text-white rounded-2xl font-bold text-xs shadow-lg active:scale-95 transition-all tracking-tight text-center ${showConfirmModal.nextStatus === true ? 'bg-green-600' : showConfirmModal.nextStatus === "hold" ? 'bg-amber-600' : 'bg-red-500'}`}>네, 맞습니다</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {showAdminModal && (
+                        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[100] p-4 backdrop-blur-sm text-center text-center text-center text-center">
+                            <div className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl animate-in zoom-in-95 duration-200 border border-gray-100 text-center text-center text-center">
+                                <Icon name="Lock" className="text-green-600 mb-4 w-10 h-10 mx-auto text-center text-center" />
+                                <h3 className="text-base font-black mb-5 text-center text-center">관리자 인증</h3>
+                                <input type="password" value={passwordInput} onChange={e => { setPasswordInput(e.target.value); setPasswordError(false); }} onKeyDown={e => e.key === 'Enter' && handleAdminLogin()} className={`w-full border-2 p-3 rounded-xl mb-3 text-center text-lg outline-none font-black transition-all ${passwordError ? 'border-red-400 bg-red-50' : 'border-gray-50 focus:border-green-400'}`} placeholder="비밀번호" autoFocus />
+                                <div className="h-4 text-center text-center">{passwordError && <p className="text-red-500 text-[10px] font-black uppercase text-center text-center">비밀번호 오류!</p>}</div>
+                                <div className="flex gap-2 mt-4 text-center text-center text-center"><button onClick={() => setShowAdminModal(false)} className="flex-1 py-3 bg-gray-50 rounded-xl font-black text-xs text-gray-400 text-center text-center">취소</button><button onClick={handleAdminLogin} className="flex-1 py-3 bg-green-600 text-white rounded-xl shadow-md text-center text-center">확인</button></div>
+                            </div>
+                        </div>
+                    )}
+
+                    {showDeleteModal && (
+                        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200] p-4 backdrop-blur-sm text-center text-center text-center text-center text-center">
+                            <div className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl animate-in zoom-in-95 duration-200 border border-gray-100 text-center text-center">
+                                <Icon name="Trash2" className="w-10 h-10 text-red-500 mb-4 mx-auto text-center text-center" />
+                                <h3 className="text-sm font-black mb-1 text-center text-center">멤버 삭제</h3>
+                                <p className="text-center text-gray-400 font-bold text-[10px] mb-6 leading-tight break-keep text-center text-center"><span className="text-red-500 font-black text-center">{showDeleteModal.name}</span>님을 DB에서 삭제할까요?<br/>구글 시트에서도 삭제됩니다.</p>
+                                <div className="flex gap-2 text-center text-center font-black text-xs"><button onClick={() => setShowDeleteModal(null)} className="flex-1 py-2.5 bg-gray-50 rounded-xl text-gray-400 text-center text-center">취소</button><button onClick={() => { const member = showDeleteModal; setMembers(prev => prev.filter(m => m.id !== member.id)); if (SHEET_API_URL) fetch(SHEET_API_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ action: 'delete', name: member.name }) }); setShowDeleteModal(null); notify(`${member.name}님 삭제 완료`); }} className="flex-1 py-2.5 bg-red-500 text-white rounded-xl shadow-md text-center text-center">삭제</button></div>
+                            </div>
+                        </div>
+                    )}
+
+                    {showGuestModal && (
+                        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[100] p-4 backdrop-blur-sm text-center text-center text-center text-center text-center">
+                            <div className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl animate-in zoom-in-95 duration-200 border border-gray-100 text-center text-center">
+                                <h3 className="text-base font-black mb-5 text-gray-800 uppercase tracking-tight text-center text-center">용병 추가 🏃‍♂️</h3>
+                                <div className="space-y-4 text-center text-center">
+                                    <input type="text" value={guestInput.name} onChange={e => setGuestInput({...guestInput, name: e.target.value})} className="w-full border border-gray-100 p-2.5 rounded-lg outline-none focus:border-green-400 font-black text-xs bg-gray-50 shadow-inner text-center text-center" placeholder="이름 또는 별명" autoFocus />
+                                    <div className="flex gap-2 text-center text-center">
+                                        <div className="flex gap-1 bg-white border border-gray-100 p-1 rounded-lg flex-1 shadow-sm text-center text-center">
+                                            <button onClick={() => setGuestInput({...guestInput, gender: '남'})} className={`flex-1 py-1.5 rounded-md font-black text-[9px] transition-all ${guestInput.gender === '남' ? 'bg-blue-50 text-blue-500' : 'bg-transparent text-blue-300'} text-center`}>남</button>
+                                            <button onClick={() => setGuestInput({...guestInput, gender: '여'})} className={`flex-1 py-1.5 rounded-md font-black text-[9px] transition-all ${guestInput.gender === '여' ? 'bg-orange-500 text-white shadow-md' : 'text-orange-300'} text-center`}>여</button>
+                                        </div>
+                                        <select value={guestInput.level} onChange={e => setGuestInput({...guestInput, level: Number(e.target.value)})} className="flex-1 border border-gray-100 p-2.5 rounded-lg outline-none focus:border-green-400 bg-white font-black text-xs shadow-sm cursor-pointer text-center">{[1,2,3,4,5].map(v => <option key={v} value={v}>Lv.{v}</option>)}</select>
+                                    </div>
+                                </div>
+                                <div className="flex gap-2 mt-8 text-center text-center font-black text-[11px] text-center">
+                                    <button onClick={() => setShowGuestModal(false)} className="flex-1 py-2.5 bg-gray-50 rounded-xl text-gray-400 uppercase tracking-tighter text-center text-center">취소</button>
+                                    <button onClick={() => { if (!guestInput.name.trim()) return; setMembers([...members, { ...guestInput, id: Date.now(), isGuest: true, isAttending: true }]); setGuestInput({ name: '', gender: '남', level: 3 }); setShowGuestModal(false); notify("용병이 추가되었습니다."); }} className="flex-1 py-2.5 bg-green-600 text-white rounded-xl shadow-md uppercase tracking-tighter text-center text-center">추가하기</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
