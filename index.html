@@ -236,8 +236,7 @@
                 if (!matchedTeams) return;
                 let text = `⚽ 오늘의 팀 매칭 결과 ⚽\n\n`;
                 matchedTeams.forEach(team => {
-                    const avg = (team.totalLevel / (team.players.length || 1)).toFixed(2);
-                    text += `[${team.name}] (평균 Lv.${avg})\n`;
+                    text += `[${team.name}]\n`;
                     text += team.players.map(p => `- ${p.name}(${p.gender === '남' ? '남' : '여'})`).join('\n');
                     text += `\n\n`;
                 });
