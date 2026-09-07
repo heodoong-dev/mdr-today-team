@@ -66,7 +66,6 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
         
-        // ✅ cdnjs 주소와 100% 호환되도록 수정된 안전한 컴포넌트 구조
         const Icon = ({ name, className }) => {
             const kebabName = name.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
             return (
@@ -88,9 +87,7 @@
             const [isLoading, setIsLoading] = useState(true);
             const [newMember, setNewMember] = useState({ name: '', gender: '남', level: 3 });
             
-            // 필터 모드 ('all' | 'attending' | 'hold' | 'unvoted')
             const [filterMode, setFilterMode] = useState('all');
-
             const [showAdminModal, setShowAdminModal] = useState(false);
             const [showGuestModal, setShowGuestModal] = useState(false);
             const [showDeleteModal, setShowDeleteModal] = useState(null); 
@@ -102,16 +99,13 @@
             const [guestInput, setGuestInput] = useState({ name: '', gender: '남', level: 3 });
             const [showToast, setShowToast] = useState(null); 
 
-            // 💡 뚱서님의 최신 API URL 유지
             const SHEET_API_URL = "https://script.google.com/macros/s/AKfycbyHqmuCwvepZmJ4Sm6__T8cWgKoG_aS_vKnAMj1fBFL54BQICAqjvxsqY_M-J6KfA/exec";
             
-            // 💡 모바일 기기 하드웨어 '뒤로가기' 대응 시스템 구축
             const anyModalOpen = !!(showAdminModal || showGuestModal || showDeleteModal || showConfirmModal || showResetModal);
             const anyModalOpenRef = useRef(anyModalOpen);
             anyModalOpenRef.current = anyModalOpen;
             const pushedStateRef = useRef(false);
 
-            // 모달 열림 감지 시 히스토리에 가상 페이지 기록하여 뒤로가기 가로채기
             useEffect(() => {
                 if (anyModalOpen) {
                     if (!pushedStateRef.current) {
@@ -128,7 +122,6 @@
                 }
             }, [anyModalOpen]);
 
-            // 디바이스 뒤로가기 버튼(popstate) 감지 시 팝업만 닫기
             useEffect(() => {
                 const handlePopState = (event) => {
                     if (anyModalOpenRef.current) {
@@ -140,25 +133,17 @@
                         pushedStateRef.current = false;
                     }
                 };
-
                 window.addEventListener('popstate', handlePopState);
-                return () => {
-                    window.removeEventListener('popstate', handlePopState);
-                };
+                return () => window.removeEventListener('popstate', handlePopState);
             }, []);
 
             const fetchMembers = () => {
                 if (!SHEET_API_URL) return;
-                
                 fetch(SHEET_API_URL)
                     .then(async (res) => {
                         const text = await res.text();
-                        try {
-                            return JSON.parse(text);
-                        } catch (e) {
-                            console.error("서버 응답 오류 (HTML 반환 가능성):", text);
-                            throw new Error("Invalid JSON");
-                        }
+                        try { return JSON.parse(text); } 
+                        catch (e) { throw new Error("Invalid JSON"); }
                     })
                     .then(data => {
                         const validMembers = data.filter(m => m && m.name && String(m.name).trim() !== '');
@@ -170,7 +155,6 @@
                             
                             let attendanceStatus = null;
                             const raw = String(m.isAttending || "").trim().toUpperCase();
-                            
                             if (m.isAttending === true || raw === "TRUE") attendanceStatus = true;
                             else if (m.isAttending === false || raw === "FALSE") attendanceStatus = false;
                             else if (raw === "HOLD" || raw === "보류") attendanceStatus = "hold";
@@ -181,15 +165,12 @@
                         setIsLoading(false); 
                     })
                     .catch(err => {
-                        console.error("데이터 로드 에러:", err);
                         notify("데이터 로딩 실패 (시트 권한을 확인하세요)");
                         setIsLoading(false);
                     });
             };
 
-            useEffect(() => {
-                fetchMembers();
-            }, []);
+            useEffect(() => { fetchMembers(); }, []);
 
             const notify = (msg) => {
                 setShowToast(msg);
@@ -255,7 +236,8 @@
                 if (!matchedTeams) return;
                 let text = `⚽ 오늘의 팀 매칭 결과 ⚽\n\n`;
                 matchedTeams.forEach(team => {
-                    text += `[${team.name}]\n`;
+                    const avg = (team.totalLevel / (team.players.length || 1)).toFixed(2);
+                    text += `[${team.name}] (평균 Lv.${avg})\n`;
                     text += team.players.map(p => `- ${p.name}(${p.gender === '남' ? '남' : '여'})`).join('\n');
                     text += `\n\n`;
                 });
@@ -278,40 +260,104 @@
                 }
                 setIsMatching(true);
                 setTimeout(() => {
-                    let teams = Array.from({ length: teamCount }, (_, i) => ({
-                        id: i, name: `${String.fromCharCode(65 + i)}팀`, players: [], totalLevel: 0, fCount: 0, mCount: 0
-                    }));
                     const females = attendees.filter(p => p.gender === '여' || p.gender === 'F').sort((a, b) => b.level - a.level);
                     const males = attendees.filter(p => p.gender === '남' || p.gender === 'M').sort((a, b) => b.level - a.level);
                     
-                    const distributeGroup = (players, isFemale) => {
-                        for (let i = 0; i < players.length; i += teamCount) {
-                            let chunk = players.slice(i, i + teamCount);
-                            chunk.sort(() => Math.random() - 0.5);
-                            teams.sort((a, b) => {
-                                const countA = isFemale ? a.fCount : a.players.length;
-                                const countB = isFemale ? b.fCount : b.players.length;
-                                if (countA !== countB) return countA - countB;
-                                return a.totalLevel - b.totalLevel;
-                            });
-                            chunk.forEach((player, idx) => {
-                                if (teams[idx]) {
-                                    teams[idx].players.push(player);
-                                    teams[idx].totalLevel += player.level;
-                                    if (isFemale) {
-                                        teams[idx].fCount += 1;
-                                    } else {
-                                        teams[idx].mCount += 1;
-                                    }
-                                }
-                            });
-                        }
+                    const getTeamAverage = (players) => {
+                        if (players.length === 0) return 0;
+                        const sum = players.reduce((acc, p) => acc + p.level, 0);
+                        return sum / players.length;
                     };
 
-                    distributeGroup(females, true);
-                    distributeGroup(males, false);
+                    const getCost = (teamsArray) => {
+                        const avgs = teamsArray.map(t => getTeamAverage(t.players));
+                        return Math.max(...avgs) - Math.min(...avgs); // 팀 간 평균 레벨의 최대 차이를 비용으로 계산
+                    };
 
-                    setMatchedTeams(teams.sort((a, b) => a.id - b.id));
+                    let bestTeams = null;
+                    let bestCost = Infinity;
+
+                    // 최적의 평균 밸런스를 찾기 위해 여러 번 시뮬레이션 (다중 시작 언덕 오르기 알고리즘)
+                    for (let attempt = 0; attempt < 30; attempt++) {
+                        let currentTeams = Array.from({ length: teamCount }, (_, i) => ({
+                            id: i, name: `${String.fromCharCode(65 + i)}팀`, players: []
+                        }));
+
+                        // 매 시도마다 배열을 무작위로 섞어 다양한 초기 상태 생성
+                        const shuffledFemales = [...females].sort(() => Math.random() - 0.5);
+                        const shuffledMales = [...males].sort(() => Math.random() - 0.5);
+
+                        // 1. 인원수를 고르게 분배 (라운드 로빈)
+                        let teamIdx = 0;
+                        shuffledFemales.forEach(p => { currentTeams[teamIdx].players.push(p); teamIdx = (teamIdx + 1) % teamCount; });
+                        shuffledMales.forEach(p => { currentTeams[teamIdx].players.push(p); teamIdx = (teamIdx + 1) % teamCount; });
+
+                        let currentCost = getCost(currentTeams);
+
+                        // 2. 무작위 스왑을 통한 평균 레벨 최적화 (성별 유지, 인원수 유지)
+                        for (let i = 0; i < 2000; i++) {
+                            if (currentCost === 0) break; // 완벽한 밸런스를 찾으면 조기 종료
+
+                            const t1Idx = Math.floor(Math.random() * teamCount);
+                            let t2Idx = Math.floor(Math.random() * teamCount);
+                            while (t1Idx === t2Idx) {
+                                t2Idx = Math.floor(Math.random() * teamCount);
+                            }
+
+                            const t1 = currentTeams[t1Idx];
+                            const t2 = currentTeams[t2Idx];
+
+                            if (t1.players.length === 0 || t2.players.length === 0) continue;
+
+                            const p1Idx = Math.floor(Math.random() * t1.players.length);
+                            const p1 = t1.players[p1Idx];
+
+                            // 같은 성별의 플레이어만 교환 대상으로 지정 (성별 밸런스 붕괴 방지)
+                            const matchingGenderPlayers = t2.players
+                                .map((p, idx) => ({ p, idx }))
+                                .filter(item => item.p.gender === p1.gender);
+
+                            if (matchingGenderPlayers.length === 0) continue;
+
+                            const p2Item = matchingGenderPlayers[Math.floor(Math.random() * matchingGenderPlayers.length)];
+                            const p2Idx = p2Item.idx;
+                            const p2 = p2Item.p;
+
+                            // 스왑 (Swap)
+                            t1.players[p1Idx] = p2;
+                            t2.players[p2Idx] = p1;
+
+                            const newCost = getCost(currentTeams);
+
+                            if (newCost < currentCost) {
+                                currentCost = newCost; // 개선됨 (채택)
+                            } else if (newCost === currentCost && Math.random() < 0.3) {
+                                // 정체 구간 탈출을 위해 동일 비용 시 일부 허용
+                            } else {
+                                // 롤백 (원상복구)
+                                t1.players[p1Idx] = p1;
+                                t2.players[p2Idx] = p2;
+                            }
+                        }
+
+                        // 최적의 조합 갱신
+                        if (currentCost < bestCost) {
+                            bestCost = currentCost;
+                            bestTeams = currentTeams.map(t => ({ ...t, players: [...t.players] }));
+                        }
+                        
+                        if (bestCost === 0) break;
+                    }
+
+                    // 최종 정리: 총합 및 카운트 계산 후 정렬
+                    bestTeams.forEach(team => {
+                        team.totalLevel = team.players.reduce((acc, p) => acc + p.level, 0);
+                        team.fCount = team.players.filter(p => p.gender === '여' || p.gender === 'F').length;
+                        team.mCount = team.players.filter(p => p.gender === '남' || p.gender === 'M').length;
+                        team.players.sort((a, b) => b.level - a.level);
+                    });
+
+                    setMatchedTeams(bestTeams.sort((a, b) => a.id - b.id));
                     setIsMatching(false);
                 }, 800);
             };
@@ -323,7 +369,6 @@
             const holdCount = members.filter(m => m.isAttending === "hold").length;
             const unvotedCount = members.filter(m => m.isAttending === null).length;
 
-            // ✅ 화면 변화가 있을 때 아이콘 도면을 최신 버전 브라우저에 실시간 반영시키는 무적 트리거
             useEffect(() => {
                 if (window.lucide) {
                     window.lucide.createIcons();
@@ -376,7 +421,6 @@
                         </div>
                         
                         <div className="flex-1 overflow-y-auto overscroll-none no-scrollbar">
-                            {/* 틀고정 영역 */}
                             <div className="sticky top-0 z-10 bg-white/95 backdrop-blur-sm px-3.5 py-1.5 shadow-[0_10px_20px_-15px_rgba(0,0,0,0.08)] border-b border-gray-50">
                                 <div className="flex justify-between items-center h-8">
                                     <div className="flex items-center gap-2 text-left">
@@ -390,32 +434,12 @@
                                     </div>
                                     <div className="flex gap-1 text-[9px] font-black items-center">
                                         {filterMode !== 'all' ? (
-                                            <button 
-                                                onClick={() => setFilterMode('all')} 
-                                                className="text-white bg-green-500 px-2.5 py-1 rounded-full shadow-md active:scale-95 transition-all text-[9px]"
-                                            >
-                                                전체보기
-                                            </button>
+                                            <button onClick={() => setFilterMode('all')} className="text-white bg-green-500 px-2.5 py-1 rounded-full shadow-md active:scale-95 transition-all text-[9px]">전체보기</button>
                                         ) : (
                                             <>
-                                                <button 
-                                                    onClick={() => attendingCount > 0 && setFilterMode('attending')}
-                                                    className={`px-2 py-0.5 rounded-full transition-all active:scale-95 ${attendingCount > 0 ? 'text-green-500 bg-green-50 shadow-sm cursor-pointer hover:bg-green-100' : 'text-gray-300 bg-gray-50 cursor-default'}`}
-                                                >
-                                                    {attendingCount} 참석
-                                                </button>
-                                                <button 
-                                                    onClick={() => holdCount > 0 && setFilterMode('hold')}
-                                                    className={`px-2 py-0.5 rounded-full transition-all active:scale-95 ${holdCount > 0 ? 'text-amber-500 bg-amber-50 shadow-sm cursor-pointer hover:bg-amber-100' : 'text-gray-300 bg-gray-50 cursor-default'}`}
-                                                >
-                                                    {holdCount} 보류
-                                                </button>
-                                                <button 
-                                                    onClick={() => unvotedCount > 0 && setFilterMode('unvoted')}
-                                                    className={`px-2 py-0.5 rounded-full transition-all active:scale-95 font-black whitespace-nowrap ${unvotedCount > 0 ? 'text-orange-500 bg-orange-50 shadow-sm cursor-pointer hover:bg-orange-100' : 'text-gray-300 bg-gray-50 cursor-default'}`}
-                                                >
-                                                    {unvotedCount} 미투표
-                                                </button>
+                                                <button onClick={() => attendingCount > 0 && setFilterMode('attending')} className={`px-2 py-0.5 rounded-full transition-all active:scale-95 ${attendingCount > 0 ? 'text-green-500 bg-green-50 shadow-sm cursor-pointer hover:bg-green-100' : 'text-gray-300 bg-gray-50 cursor-default'}`}>{attendingCount} 참석</button>
+                                                <button onClick={() => holdCount > 0 && setFilterMode('hold')} className={`px-2 py-0.5 rounded-full transition-all active:scale-95 ${holdCount > 0 ? 'text-amber-500 bg-amber-50 shadow-sm cursor-pointer hover:bg-amber-100' : 'text-gray-300 bg-gray-50 cursor-default'}`}>{holdCount} 보류</button>
+                                                <button onClick={() => unvotedCount > 0 && setFilterMode('unvoted')} className={`px-2 py-0.5 rounded-full transition-all active:scale-95 font-black whitespace-nowrap ${unvotedCount > 0 ? 'text-orange-500 bg-orange-50 shadow-sm cursor-pointer hover:bg-orange-100' : 'text-gray-300 bg-gray-50 cursor-default'}`}>{unvotedCount} 미투표</button>
                                             </>
                                         )}
                                     </div>
@@ -465,13 +489,15 @@
                             <>
                                 <div className="bg-white border-b border-gray-100 px-4 md:px-8 flex gap-6 sticky top-0 z-10 shadow-sm text-sm font-bold shrink-0">
                                     <button onClick={() => setMainTab('match')} className={`py-4 border-b-2 transition-all ${mainTab === 'match' ? 'border-green-500 text-green-600' : 'border-transparent text-gray-400'}`}>팀 매칭 결과</button>
-                                    <button onClick={() => setMainTab('manage')} className={`py-4 border-b-2 transition-all ${mainTab === 'manage' ? 'border-green-555 text-green-600' : 'border-transparent text-gray-400'}`}>멤버 DB 관리</button>
+                                    <button onClick={() => setMainTab('manage')} className={`py-4 border-b-2 transition-all ${mainTab === 'manage' ? 'border-green-500 text-green-600' : 'border-transparent text-gray-400'}`}>멤버 DB 관리</button>
                                 </div>
                                 <div className="flex-1 overflow-y-auto no-scrollbar p-4 pb-28 md:p-8 md:pb-8">
                                     {mainTab === 'match' ? (
                                         <div className="animate-in fade-in duration-500 text-center">
                                             <h2 className="text-xl md:text-2xl font-black mb-1 leading-tight break-keep text-gray-800">{matchedTeams ? "짜잔! 황금 밸런스 팀 탄생! 🎉" : "운명적인 팀원은 누구? 지금 바로 확인하기!"}</h2>
                                             <p className="text-gray-400 text-[11px] md:text-xs font-medium mb-6 uppercase tracking-tight break-keep">{matchedTeams ? "성별과 실력을 고려해 최상의 조합을 찾았습니다." : "오늘 우리 팀의 라인업을 확인해보세요."}</p>
+                                            
+                                            {}
                                             <div className="bg-white p-4 md:p-5 rounded-2xl shadow-sm border border-gray-100 mb-6 mx-auto max-lg text-left">
                                                 <div className="flex flex-col md:flex-row items-center justify-between gap-4">
                                                     <div className="flex items-center gap-3"><label className="text-[10px] font-black text-gray-300 uppercase tracking-tighter whitespace-nowrap">매치 방식</label><div className="flex gap-1.5">{[2, 3, 4].map(num => (
@@ -494,13 +520,15 @@
                                                     )}
                                                 </div>
                                             </div>
+
+                                            {}
                                             {matchedTeams && (
                                                 <div className={`mx-auto space-y-6 ${matchedTeams.length === 3 ? 'max-w-5xl' : 'max-w-3xl'}`}>
                                                     <div className="flex justify-end"><button onClick={handleShareText} className="flex items-center gap-2 px-4 py-2 bg-[#FEE500] text-[#371D1E] rounded-xl font-black shadow-sm text-[11px] active:scale-95 transition-all hover:bg-[#F4DC00]"><Icon name="Share2" className="w-3.5 h-3.5" /> 결과 텍스트 복사</button></div>
                                                     <div className={`grid grid-cols-1 gap-4 ${matchedTeams.length === 3 ? 'md:grid-cols-3' : 'md:grid-cols-2 max-w-4xl mx-auto'}`}>
                                                         {matchedTeams.map((team, idx) => (
                                                             <div key={idx} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden text-left border-t-4 border-t-green-600">
-                                                                <div className="bg-green-50/50 p-4 flex justify-between items-center text-green-700 font-black"><h3 className="text-base uppercase tracking-tighter">{team.name}</h3><span className="text-[9px] font-black bg-white text-green-600 border border-green-200 px-2 py-0.5 rounded-full shadow-sm">합 {team.totalLevel}</span></div>
+                                                                <div className="bg-green-50/50 p-4 flex justify-between items-center text-green-700 font-black"><h3 className="text-base uppercase tracking-tighter">{team.name}</h3><span className="text-[9px] font-black bg-white text-green-600 border border-green-200 px-2 py-0.5 rounded-full shadow-sm">평균 {(team.totalLevel / (team.players.length || 1)).toFixed(2)}</span></div>
                                                                 <div className="px-4 py-2 bg-gray-50 flex justify-between text-[9px] font-black text-gray-400 border-b border-gray-100 uppercase tracking-tighter"><span>{team.players.length}명 참여</span><span>남 {team.mCount} / 여 {team.fCount}</span></div>
                                                                 <div className="p-2 space-y-1 bg-white">{team.players.map(p => (<div key={p.id} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded-lg transition-colors text-left"><div className="flex items-center gap-2"><span className={`text-[8px] font-black w-4 h-4 flex items-center justify-center rounded-full ${p.gender === '남' ? 'bg-blue-50 text-blue-500' : 'bg-orange-100 text-orange-600'}`}>{p.gender}</span><span className="font-bold text-gray-700 text-xs">{p.name}</span></div><span className="text-[9px] font-black text-gray-300 tracking-tighter">Lv.{p.level}</span></div>))}</div>
                                                             </div>
@@ -554,10 +582,9 @@
                         )}
                     </div>
 
-                    {/* ✅ 하단 모바일 내비게이션 탭 바 영역 완벽 렌더링 검증 완료 */}
+                    {}
                     <div className="md:hidden fixed bottom-0 w-full bg-white/90 backdrop-blur-md border-t border-gray-50 flex justify-around p-2 pb-safe z-50 shadow-lg shrink-0">
                         <button onClick={() => handleTabChange('members')} className={`flex flex-col items-center py-2 flex-1 transition-all ${activeTab === 'members' ? 'text-green-600 scale-105 font-black' : 'text-gray-300'}`}>
-                            {/* 💡 무조건 사람 모양 아이콘을 그려내는 무적의 코드 */}
                             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mb-0.5">
                                 <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
                                 <circle cx="9" cy="7" r="4" />
@@ -572,7 +599,6 @@
                         </button>
                     </div>
 
-                    {/* 전체 초기화 확인 모달 */}
                     {showResetModal && (
                         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[150] p-4 backdrop-blur-sm">
                             <div className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl animate-in zoom-in-95 duration-200 border border-gray-100">
@@ -589,7 +615,6 @@
                         </div>
                     )}
 
-                    {/* 본인 확인 팝업 */}
                     {showConfirmModal && (
                         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[110] p-4 backdrop-blur-sm">
                             <div className="bg-white rounded-3xl p-8 max-w-xs w-full shadow-2xl animate-in zoom-in-95 duration-200 border border-gray-100">
@@ -611,7 +636,6 @@
                         </div>
                     )}
 
-                    {/* 관리자 인증 모달 */}
                     {showAdminModal && (
                         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[100] p-4 backdrop-blur-sm">
                             <div className="bg-white rounded-[2rem] p-8 max-w-xs w-full shadow-2xl animate-in zoom-in-95 duration-200 border border-gray-100">
@@ -628,7 +652,6 @@
                         </div>
                     )}
 
-                    {/* 삭제 모달 */}
                     {showDeleteModal && (
                         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200] p-4 backdrop-blur-sm">
                             <div className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl animate-in zoom-in-95 duration-200 border border-gray-100">
@@ -640,7 +663,6 @@
                         </div>
                     )}
 
-                    {/* 용병 모달 */}
                     {showGuestModal && (
                         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[100] p-4 backdrop-blur-sm">
                             <div className="bg-white rounded-[2.5rem] p-8 max-w-xs w-full shadow-2xl animate-in zoom-in-95 duration-200 border border-gray-100">
