@@ -353,7 +353,12 @@
                         team.totalLevel = team.players.reduce((acc, p) => acc + p.level, 0);
                         team.fCount = team.players.filter(p => p.gender === '여' || p.gender === 'F').length;
                         team.mCount = team.players.filter(p => p.gender === '남' || p.gender === 'M').length;
-                        team.players.sort((a, b) => b.level - a.level);
+                        
+                        // 완벽한 무작위 배열 섞기를 위해 Fisher-Yates 셔플 알고리즘 적용
+                        for (let i = team.players.length - 1; i > 0; i--) {
+                            const j = Math.floor(Math.random() * (i + 1));
+                            [team.players[i], team.players[j]] = [team.players[j], team.players[i]];
+                        }
                     });
 
                     setMatchedTeams(bestTeams.sort((a, b) => a.id - b.id));
